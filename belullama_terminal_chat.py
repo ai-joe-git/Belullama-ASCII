@@ -1,97 +1,62 @@
 import os
-import time
 import requests
 import json
+import time
+import sys
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def print_header():
-    header = """
-  ____  _ _                         
- / __ \| | |                        
-| |  | | | | __ _ _ __ ___   __ _   
-| |  | | | |/ _` | '_ ` _ \ / _` |  
-| |__| | | | (_| | | | | | | (_| |  
- \____/|_|_|\__,_|_| |_| |_|\__,_|  
-    (Using Qwen2 model)
-    """
-    print(header)
+    print("=" * 50)
+    print("Ollama Chat (Using Qwen2 model)")
+    print("=" * 50)
 
-def print_chat_interface(chat_history, input_buffer):
-    clear_screen()
-    print_header()
-    print("\n" + "=" * 60 + "\n")
-
-    for sender, message in chat_history:
-        if sender == "You":
-            print(f"┌───── You ─────┐")
-        else:
-            print(f"┌───── Qwen2 ─────┐")
-        
-        words = message.split()
-        lines = []
-        current_line = ""
-        for word in words:
-            if len(current_line) + len(word) + 1 <= 58:
-                current_line += " " + word if current_line else word
-            else:
-                lines.append(current_line)
-                current_line = word
-        if current_line:
-            lines.append(current_line)
-        
-        for line in lines:
-            print(f"│ {line:<58} │")
-        print(f"└{'─' * 60}┘\n")
-
-    print("\n" + "=" * 60)
-    print("┌───── Input ─────┐")
-    print(f"│ {input_buffer:<58} │")
-    print("└" + "─" * 60 + "┘")
+def type_effect(text, delay=0.02):
+    for char in text:
+        sys.stdout.write(char)
+        sys.stdout.flush()
+        time.sleep(delay)
+    print()
 
 def get_qwen2_response(prompt):
     url = "http://localhost:11434/api/generate"
     data = {
         "model": "qwen2",
-        "prompt": prompt
+        "prompt": prompt,
+        "stream": True
     }
     try:
-        response = requests.post(url, json=data)
-        if response.status_code == 200:
-            return json.loads(response.text)['response']
-        else:
-            return f"Error: Unable to get response from Qwen2. Status code: {response.status_code}"
+        response = requests.post(url, json=data, stream=True)
+        response.raise_for_status()
+        print("\nQwen2:", end=" ", flush=True)
+        for line in response.iter_lines():
+            if line:
+                decoded_line = line.decode('utf-8')
+                try:
+                    json_line = json.loads(decoded_line)
+                    if 'response' in json_line:
+                        type_effect(json_line['response'], delay=0.01)
+                    if json_line.get('done', False):
+                        break
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {decoded_line}")
+        print()  # Add a newline after the response
     except requests.exceptions.RequestException as e:
-        return f"Error: Unable to connect to Ollama. Make sure it's running. Details: {str(e)}"
+        print(f"Error: {str(e)}")
 
 def main():
-    chat_history = []
-    input_buffer = ""
+    clear_screen()
+    print_header()
     
     while True:
-        print_chat_interface(chat_history, input_buffer)
+        user_input = input("\nYou: ")
+        if user_input.lower() in ['exit', 'quit', 'bye']:
+            print("Goodbye!")
+            break
         
-        char = input()
-        if char == '\n':
-            if input_buffer.lower() in ['exit', 'quit', 'bye']:
-                print("Goodbye!")
-                break
-            
-            chat_history.append(("You", input_buffer))
-            
-            print("\nQwen2 is thinking", end="", flush=True)
-            for _ in range(3):
-                time.sleep(0.5)
-                print(".", end="", flush=True)
-            print("\n")
-            
-            ai_response = get_qwen2_response(input_buffer)
-            chat_history.append(("Qwen2", ai_response))
-            
-            input_buffer = ""
-        else:
-            input_buffer += char
+        get_qwen2_response(user_input)
+        print("-" * 50)
 
 if __name__ == "__main__":
     main()
