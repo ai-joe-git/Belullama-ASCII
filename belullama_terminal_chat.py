@@ -5,6 +5,10 @@ import time
 import subprocess
 import threading
 from colorama import init, Fore, Style
+from prompt_toolkit import prompt
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import InMemoryHistory
+from tqdm import tqdm
 
 init(autoreset=True)
 
@@ -17,6 +21,11 @@ class OllamaTerminalChat:
         self.model = None
         self.conversation_history = []
         self.stop_spinner = False
+        self.command_completer = WordCompleter(
+            ['/bye', '/models', '/reset', '/clear', '/help', '/change', '/status', '/start', '/stop'],
+            ignore_case=True
+        )
+        self.command_history = InMemoryHistory()
 
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -68,6 +77,11 @@ class OllamaTerminalChat:
 
     def pull_model(self, model_name):
         try:
+            with tqdm(total=100, desc=f"Pulling model {model_name}", bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as pbar:
+                for _ in range(100):
+                    time.sleep(0.1)  # Simulate progress
+                    pbar.update(1)
+
             response = requests.post(f"{OLLAMA_URL}/api/models/pull", json={"model_name": model_name})
             response.raise_for_status()
             print(Fore.GREEN + f"Model '{model_name}' pulled successfully.")
@@ -180,9 +194,9 @@ class OllamaTerminalChat:
         
         self.model = self.select_model()
         print(f"\nUsing model: {self.model}")
-        
+
         while True:
-            user_input = input("\nYou: ").strip()
+            user_input = prompt("\nYou: ", completer=self.command_completer, history=self.command_history).strip()
             
             if user_input.startswith('/'):
                 command = user_input[1:].lower()
@@ -227,5 +241,4 @@ class OllamaTerminalChat:
             print(Fore.CYAN + "-" * 80)
 
 if __name__ == "__main__":
-    chat = OllamaTerminalChat()
-    chat.main()
+    OllamaTerminalChat().main()
