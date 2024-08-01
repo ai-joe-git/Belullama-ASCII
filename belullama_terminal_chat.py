@@ -14,7 +14,7 @@ init(autoreset=True)
 
 OLLAMA_URL = "http://localhost:11434"
 LOG_FILE = "/tmp/ollama_server.log"
-TIMEOUT = 60  # Increased timeout duration
+TIMEOUT = 240  # Increased timeout duration
 
 class OllamaTerminalChat:
     def __init__(self):
