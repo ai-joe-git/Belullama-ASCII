@@ -1,11 +1,14 @@
 import os
 import sys
 import requests
-import json
 import time
+import subprocess
 from colorama import init, Fore, Style
 
 init(autoreset=True)
+
+OLLAMA_URL = "http://localhost:11434"
+LOG_FILE = "/tmp/ollama_server.log"
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -16,37 +19,80 @@ def print_header():
     print(Fore.CYAN + header.center(80))
     print(Fore.CYAN + "=" * 80)
 
-def get_available_models():
+def check_ollama_connection():
     try:
-        response = requests.get("http://localhost:11434/api/tags")
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+def start_ollama():
+    try:
+        with open(LOG_FILE, "w") as log_file:
+            subprocess.Popen(["ollama", "start"], stdout=log_file, stderr=log_file)
+        print(Fore.GREEN + "Ollama service started.")
+    except subprocess.SubprocessError as e:
+        print(Fore.RED + f"Failed to start Ollama service: {str(e)}")
+
+def stop_ollama():
+    try:
+        with open(LOG_FILE, "w") as log_file:
+            subprocess.Popen(["ollama", "stop"], stdout=log_file, stderr=log_file)
+        print(Fore.RED + "Ollama service stopped.")
+    except subprocess.SubprocessError as e:
+        print(Fore.RED + f"Failed to stop Ollama service: {str(e)}")
+
+def get_available_models():
+    if not check_ollama_connection():
+        print(Fore.YELLOW + "Warning: Unable to connect to Ollama server.")
+        return []
+    
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/tags")
         response.raise_for_status()
         models = response.json()['models']
         return [model['name'] for model in models]
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching models: {str(e)}")
+        print(Fore.YELLOW + f"Error fetching models: {str(e)}")
         return []
+
+def pull_model(model_name):
+    try:
+        response = requests.post(f"{OLLAMA_URL}/api/models/pull", json={"model_name": model_name})
+        response.raise_for_status()
+        print(Fore.GREEN + f"Model '{model_name}' pulled successfully.")
+    except requests.exceptions.RequestException as e:
+        print(Fore.RED + f"Failed to pull model '{model_name}': {str(e)}")
 
 def select_model():
     available_models = get_available_models()
     
     while True:
-        print("\nAvailable models:")
-        for i, model in enumerate(available_models, 1):
-            print(f"  {i}. {model}")
-        print(f"  {len(available_models) + 1}. Pull a new model")
-        
-        choice = input("\nSelect a model number or enter a new model name to pull: ").strip()
-        
-        if choice.isdigit() and 1 <= int(choice) <= len(available_models):
-            return available_models[int(choice) - 1]
-        elif choice.isdigit() and int(choice) == len(available_models) + 1:
-            new_model = input("Enter the name of the model to pull: ").strip()
+        if not available_models:
+            print("\nNo available models. Please enter a custom model name.")
+            new_model = input("Enter the name of the model: ").strip()
             if new_model and not new_model.isspace():
+                pull_model(new_model)
                 return new_model
-        elif choice:
-            return choice
-        
-        print("Invalid choice. Please try again.")
+        else:
+            print("\nAvailable models:")
+            for i, model in enumerate(available_models, 1):
+                print(f"  {i}. {model}")
+            print(f"  {len(available_models) + 1}. Enter custom model name")
+            
+            choice = input("\nSelect a model number or enter a new model name: ").strip()
+            
+            if choice.isdigit() and 1 <= int(choice) <= len(available_models):
+                return available_models[int(choice) - 1]
+            elif choice.isdigit() and int(choice) == len(available_models) + 1:
+                new_model = input("Enter the name of the model: ").strip()
+                if new_model and not new_model.isspace():
+                    pull_model(new_model)
+                    return new_model
+            elif choice:
+                return choice
+            
+            print("Invalid choice. Please try again.")
 
 def print_message(role, message):
     if role == "You":
@@ -61,19 +107,22 @@ def print_message(role, message):
         print()
 
 def get_model_response(prompt, model):
-    url = "http://localhost:11434/api/generate"
+    if not check_ollama_connection():
+        return f"[Error] Unable to get response from Ollama. Check server connection."
+    
+    url = f"{OLLAMA_URL}/api/generate"
     data = {
         "model": model,
         "prompt": prompt,
         "stream": False
     }
     try:
-        response = requests.post(url, json=data)
+        response = requests.post(url, json=data, timeout=30)
         response.raise_for_status()
         return response.json()['response']
     except requests.exceptions.RequestException as e:
-        print(f"Error: {str(e)}")
-        return ""
+        print(Fore.YELLOW + f"Error: {str(e)}")
+        return f"[Error] Unable to get response from Ollama. Check server connection."
 
 def print_help():
     print(Fore.YELLOW + "\nAvailable commands:")
@@ -83,10 +132,22 @@ def print_help():
     print("/clear - Clear the screen")
     print("/help - Show this help message")
     print("/change - Change the current model")
+    print("/status - Check Ollama server status")
+    print("/start - Start the Ollama server")
+    print("/stop - Stop the Ollama server")
 
 def main():
     clear_screen()
     print_header()
+    
+    if not check_ollama_connection():
+        print(Fore.YELLOW + "Warning: Unable to connect to Ollama server. Trying to start the server...")
+        start_ollama()
+        time.sleep(5)  # Wait for a few seconds to allow the server to start
+
+    if not check_ollama_connection():
+        print(Fore.RED + "Error: Unable to connect to Ollama server after attempting to start it.")
+        return
     
     model = select_model()
     print(f"\nUsing model: {model}")
@@ -116,6 +177,16 @@ def main():
             elif command == 'change':
                 model = select_model()
                 print(f"\nSwitched to model: {model}")
+            elif command == 'status':
+                status = "Connected" if check_ollama_connection() else "Disconnected"
+                print(f"Ollama server status: {status}")
+            elif command == 'start':
+                start_ollama()
+                time.sleep(5)  # Wait for a few seconds to allow the server to start
+                if not check_ollama_connection():
+                    print(Fore.RED + "Error: Unable to connect to Ollama server after attempting to start it.")
+            elif command == 'stop':
+                stop_ollama()
             else:
                 print(f"Unknown command: {user_input}")
             continue
@@ -123,13 +194,9 @@ def main():
         conversation_history.append(f"Human: {user_input}")
         full_prompt = "\n".join(conversation_history)
         
-        try:
-            ai_response = get_model_response(full_prompt, model)
-            print_message(model, ai_response)
-            conversation_history.append(f"Assistant: {ai_response}")
-        except Exception as e:
-            print(f"Error: {str(e)}")
-            print("Unable to generate response. You may want to change the model.")
+        ai_response = get_model_response(full_prompt, model)
+        print_message(model, ai_response)
+        conversation_history.append(f"Assistant: {ai_response}")
         print(Fore.CYAN + "-" * 80)
 
 if __name__ == "__main__":
